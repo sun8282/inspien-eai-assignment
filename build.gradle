@@ -17,6 +17,8 @@ repositories {
 
 dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
+    implementation 'commons-net:commons-net:3.11.1'
+    runtimeOnly 'com.oracle.database.jdbc:ojdbc11:23.5.0.24.07'
 
     testImplementation platform('org.junit:junit-bom:5.10.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -37,4 +39,13 @@ tasks.register('fetchInfo', JavaExec) {
     // 사용: gradle fetchInfo [-Prefetch] [-Preveal]
     args = ['refetch', 'reveal'].findAll { project.hasProperty(it) }.collect { '--' + it }
     standardInput = System.in
+}
+
+// 접속 점검 (읽기 전용): DB 컬럼·PK 대조, FTP 경로·UTF-8 확인
+tasks.register('connCheck', JavaExec) {
+    group = 'setup'
+    description = 'DB·FTP 접속 점검 (읽기 전용, 주소·계정 비노출)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.inspien.eai.tool.ConnectivityCheck'
+    workingDir = rootDir
 }

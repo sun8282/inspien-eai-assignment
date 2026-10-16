@@ -3,9 +3,9 @@ package com.inspien.eai.tool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.TextNode;
 import com.inspien.eai.config.ConnectionInfoCipher;
 import com.inspien.eai.config.Env;
+import com.inspien.eai.config.ProvisionInfo;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -76,7 +76,7 @@ public final class FetchProvisionInfo {
         for (Iterator<Map.Entry<String, JsonNode>> it = root.fields(); it.hasNext(); ) {
             Map.Entry<String, JsonNode> field = it.next();
             if (!field.getKey().endsWith("_CONN")) continue;
-            JsonNode decrypted = decryptNode(cipher, field.getValue());
+            JsonNode decrypted = ProvisionInfo.decrypt(cipher, field.getValue());
             System.out.println("\n[" + field.getKey() + "]");
             System.out.println(JSON.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(reveal ? decrypted : mask(decrypted)));
@@ -114,41 +114,6 @@ public final class FetchProvisionInfo {
                     + "\n" + (b.length() > 2000 ? b.substring(0, 2000) + "..." : b));
         }
         return res.body();
-    }
-
-    /** 문자열이면 통째로, 객체면 필드별로 복호화. 복호화 결과가 JSON 이면 파싱. */
-    private static JsonNode decryptNode(ConnectionInfoCipher cipher, JsonNode node) {
-        if (node.isTextual()) {
-            return parseIfJson(cipher.decrypt(node.asText()));
-        }
-        if (node.isObject()) {
-            ObjectNode out = JSON.createObjectNode();
-            node.fields().forEachRemaining(f -> {
-                if (f.getValue().isTextual()) {
-                    try {
-                        out.set(f.getKey(), parseIfJson(cipher.decrypt(f.getValue().asText())));
-                    } catch (ConnectionInfoCipher.DecryptionException e) {
-                        out.set(f.getKey(), f.getValue()); // 평문 필드는 그대로
-                    }
-                } else {
-                    out.set(f.getKey(), f.getValue());
-                }
-            });
-            return out;
-        }
-        return node;
-    }
-
-    private static JsonNode parseIfJson(String text) {
-        String t = text.strip();
-        if (t.startsWith("{") || t.startsWith("[")) {
-            try {
-                return JSON.readTree(t);
-            } catch (Exception ignored) {
-                // JSON 이 아니면 문자열로
-            }
-        }
-        return TextNode.valueOf(text);
     }
 
     /** 기본 출력 정책: 비밀번호는 전부, 접속 주소·계정은 구조만 남기고 가린다. 평문은 --reveal 에서만. */
