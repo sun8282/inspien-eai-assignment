@@ -41,6 +41,8 @@ public final class FetchProvisionInfo {
     private static final Pattern PHONE = Pattern.compile("^010-\\d{4}-\\d{4}$");
     private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     private static final Pattern SECRET_KEY = Pattern.compile("(?i).*(pass|pwd|pw|secret).*");
+    /** 비밀은 아니지만 출력에 남기면 안 되는 접속 식별정보 — 기본 마스킹 */
+    private static final Pattern IDENTITY_KEY = Pattern.compile("(?i)^(url|host|ip|id|user|username)$");
     private static final Charset EUC_KR = Charset.forName("EUC-KR");
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -149,12 +151,29 @@ public final class FetchProvisionInfo {
         return TextNode.valueOf(text);
     }
 
-    private static JsonNode mask(JsonNode node) {
+    /** 기본 출력 정책: 비밀번호는 전부, 접속 주소·계정은 구조만 남기고 가린다. 평문은 --reveal 에서만. */
+    static JsonNode mask(JsonNode node) {
         if (!node.isObject()) return node;
         ObjectNode out = JSON.createObjectNode();
-        node.fields().forEachRemaining(f -> out.set(f.getKey(),
-                SECRET_KEY.matcher(f.getKey()).matches() ? TextNode.valueOf("****") : mask(f.getValue())));
+        node.fields().forEachRemaining(f -> {
+            String key = f.getKey();
+            JsonNode value = f.getValue();
+            if (SECRET_KEY.matcher(key).matches()) {
+                out.put(key, "****");
+            } else if (IDENTITY_KEY.matcher(key).matches() && value.isValueNode()) {
+                out.put(key, maskIdentity(value.asText()));
+            } else {
+                out.set(key, mask(value));
+            }
+        });
         return out;
+    }
+
+    /** jdbc URL 은 드라이버 종류만, 그 외는 전부 가림. 예) jdbc:oracle:thin:@*** */
+    static String maskIdentity(String value) {
+        int at = value.indexOf('@');
+        if (value.startsWith("jdbc:") && at > 0) return value.substring(0, at + 1) + "***";
+        return "***";
     }
 
     private static void validate(String name, String phone, String email) {
