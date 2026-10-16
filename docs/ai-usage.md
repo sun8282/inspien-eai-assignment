@@ -6,3 +6,4 @@
 | 10/16 | Claude (Claude Code) | 접속정보 복호화 유틸 | AES-128/ECB·SHA-1 키 유도 구현, 단위테스트 작성 | 가이드 규칙을 테스트에서 독립 재구현해 교차 검증 |
 | 10/16 | Claude (Claude Code) | 접속 점검 도구 | DB 메타데이터·FTP 점검 코드 작성 | Oracle LONG(COLUMN_DEF) 읽기 순서 오류(ORA-17027) 원인 확인·수정, 출력 비식별화 원칙 수립 |
 | 10/16 | Claude (Claude Code) | 시나리오1-a 구현 | 파서·조인·채번·REST·Flow 코드 및 단위테스트 작성 | 부분 수용 정책(A안) 결정, 실데이터 63/11건 E2E 및 DB 값 대조로 검증 |
+| 10/16 | Claude (Claude Code) | 시나리오1-b 구현 | FTP Receiver·동기화 흐름·장애 주입 테스트(H2+가짜 FTP) 작성 | 실서버에서 rename/delete/download 권한 부재를 직접 진단 → tmp→rename·삭제 보상 설계를 폐기하고 "미커밋 트랜잭션으로 감싸기 + roll-forward"로 재설계. 테스트가 잡은 잠금 교착 원인 확인 |
