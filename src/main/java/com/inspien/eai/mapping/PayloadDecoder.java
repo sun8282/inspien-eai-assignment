@@ -19,7 +19,10 @@ import java.util.regex.Pattern;
  */
 public final class PayloadDecoder {
 
-    public record Decoded(String text, Charset charset, String source) { }
+    public record Decoded(String text, Charset charset, String source) {
+        /** 로그용: "EUC-KR (Content-Type 선언)" */
+        public String describe() { return charset.name() + " (" + source + ")"; }
+    }
 
     private static final Pattern CT_CHARSET = Pattern.compile("(?i)charset\\s*=\\s*\"?([\\w.:-]+)\"?");
     private static final Pattern XML_ENCODING = Pattern.compile("^\\s*<\\?xml[^>]*encoding\\s*=\\s*[\"']([\\w.:-]+)[\"']");
@@ -31,7 +34,7 @@ public final class PayloadDecoder {
         byte[] bytes = stripUtf8Bom(body);
 
         Charset declared = contentType == null ? null : charsetFrom(CT_CHARSET.matcher(contentType));
-        if (declared != null) return new Decoded(strict(bytes, declared), declared, "Content-Type");
+        if (declared != null) return new Decoded(strict(bytes, declared), declared, "Content-Type 선언");
 
         // XML 선언은 ASCII 범위라 ISO-8859-1 로 앞부분만 읽어도 안전
         String head = new String(bytes, 0, Math.min(bytes.length, 200), StandardCharsets.ISO_8859_1);
@@ -39,9 +42,9 @@ public final class PayloadDecoder {
         if (xmlDeclared != null) return new Decoded(strict(bytes, xmlDeclared), xmlDeclared, "XML 선언");
 
         try {
-            return new Decoded(strictOrThrow(bytes, StandardCharsets.UTF_8), StandardCharsets.UTF_8, "기본(UTF-8)");
+            return new Decoded(strictOrThrow(bytes, StandardCharsets.UTF_8), StandardCharsets.UTF_8, "미선언, 기본값");
         } catch (CharacterCodingException notUtf8) {
-            return new Decoded(strict(bytes, EUC_KR), EUC_KR, "대체(EUC-KR)");
+            return new Decoded(strict(bytes, EUC_KR), EUC_KR, "미선언, UTF-8 해석 실패 → 대체");
         }
     }
 

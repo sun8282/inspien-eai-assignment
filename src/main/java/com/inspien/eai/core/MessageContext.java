@@ -37,7 +37,8 @@ public final class MessageContext {
             steps.add(new Step(name, "OK", elapsed(t), null));
             return result;
         } catch (Exception e) {
-            steps.add(new Step(name, "FAIL", elapsed(t), e.getClass().getSimpleName()));
+            steps.add(new Step(name, "FAIL", elapsed(t),
+                    e instanceof EaiException ee ? ee.code().name() : e.getClass().getSimpleName()));
             throw e;
         }
     }

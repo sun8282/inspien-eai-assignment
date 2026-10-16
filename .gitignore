@@ -15,6 +15,7 @@ out/
 
 # runtime
 logs/
+archive/
 
 # 개인 준비 문서 (비공개)
 docs/PLAN.md

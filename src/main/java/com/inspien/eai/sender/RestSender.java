@@ -82,6 +82,7 @@ public final class RestSender {
         n.put("receivedItemCount", r.receivedItemCount());
         n.put("processedCount", r.processedCount());
         n.put("excludedCount", r.excludedCount());
+        if (r.receiptFile() != null && r.errorCode() == null) n.put("receiptFile", r.receiptFile());
         ArrayNode ids = n.putArray("orderIds");
         r.orderIds().forEach(ids::add);
         ArrayNode ex = n.putArray("excluded");

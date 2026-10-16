@@ -8,7 +8,7 @@ import java.util.List;
 public record OrderResult(String msgId, String interfaceId, ResultCode resultCode, String message,
                           int receivedHeaderCount, int receivedItemCount,
                           List<String> orderIds, List<ExcludedRecord> excluded,
-                          String errorCode) {
+                          String errorCode, String receiptFile) {
 
     public enum ResultCode { SUCCESS, PARTIAL_SUCCESS, FAIL }
 

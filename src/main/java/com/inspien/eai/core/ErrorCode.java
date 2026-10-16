@@ -15,6 +15,10 @@ public enum ErrorCode {
     DB_TIMEOUT(503, true, "DB 응답 시간 초과"),
     DB_DUPLICATE_KEY(500, true, "DB 키 중복"),
     DB_ERROR(500, false, "DB 처리 오류"),
+    FTP_CONNECTION(503, true, "FTP 연결/로그인 실패"),
+    FTP_TRANSFER(502, true, "FTP 파일 전송 실패"),
+    /** 파일 공개 후 DB 커밋·재적재(roll-forward)까지 실패 → 파일만 존재. 재전송 금지, 운영자 수동 조치 필요 */
+    RECOVERY_FAILED(500, false, "복구 실패 — 수동 조치 필요"),
     INTERNAL(500, false, "내부 오류");
 
     private final int httpStatus;

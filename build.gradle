@@ -31,6 +31,7 @@ dependencies {
 
     testImplementation platform('org.junit:junit-bom:5.10.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'com.h2database:h2:2.2.224' // 장애 주입 테스트용 인메모리 DB (Oracle 모드) — 운영 DB 미사용
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
