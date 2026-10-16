@@ -1,0 +1,40 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.inspien.eai'
+version = '0.1.0'
+
+// 로컬 JDK(25)로 빌드하되 산출물은 Java 17 기준
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.encoding = 'UTF-8'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
+
+    testImplementation platform('org.junit:junit-bom:5.10.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// 과제 제공 정보 수신 + 접속정보 복호화 (1회성 준비 도구)
+tasks.register('fetchInfo', JavaExec) {
+    group = 'setup'
+    description = '제공 정보 API 호출 → secrets/ 에 응답 저장 → 접속정보 복호화 확인'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.inspien.eai.tool.FetchProvisionInfo'
+    workingDir = rootDir
+    // 사용: gradle fetchInfo [-Prefetch] [-Preveal]
+    args = ['refetch', 'reveal'].findAll { project.hasProperty(it) }.collect { '--' + it }
+    standardInput = System.in
+}

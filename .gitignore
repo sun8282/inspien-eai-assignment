@@ -1,0 +1,20 @@
+# 비밀값 — 절대 커밋 금지
+.env
+secrets/
+
+# build
+.gradle/
+build/
+out/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# runtime
+logs/
+
+# 개인 준비 문서 (비공개)
+docs/PLAN.md
