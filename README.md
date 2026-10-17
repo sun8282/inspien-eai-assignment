@@ -187,6 +187,7 @@ FTP 재조회가 불가하므로 **보낸 바이트를 `archive/`에 그대로 �
  "resultCode":"SUCCESS","durationMs":785,"fetched":189,"shipped":189,"repaired":0,"skipped":0,"failed":0,"chunks":2,
  "shipmentIdRange":"A001~A189","failures":[]}
 ```
+기동 시 점검 결과도 `"interfaceId":"SYSTEM","type":"STARTUP"` 레코드로 남습니다(`checks` 배열).
 `steps`의 마지막 `FAIL` 단계가 장애 지점이고, `detail`에 에러코드가 남습니다. 사람이 처리해야 할 건은 `manualAction` 필드로 표시됩니다.
 
 ---

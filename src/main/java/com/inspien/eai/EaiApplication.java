@@ -34,15 +34,16 @@ public final class EaiApplication {
         Env env = Env.load();
         ProvisionInfo info = ProvisionInfo.load(env);
         int port = Integer.parseInt(env.get("SERVER_PORT") == null ? "8080" : env.get("SERVER_PORT"));
+        InterfaceLogWriter log = new InterfaceLogWriter(Path.of(env.get("LOG_DIR") == null ? "logs" : env.get("LOG_DIR")));
+
         System.out.println("[INFO] 기동 점검 (APPLICANT_KEY=" + info.applicantKey() + ")");
         List<Preflight.Check> checks = Preflight.run(info);
         checks.forEach(System.out::println);
+        writeStartupLog(log, checks);
         if (Preflight.hasFatal(checks)) {
             System.err.println("[FATAL] 설정 오류로 기동 중단 — 위 ✗ 항목 확인 (재시도로 해결되지 않는 오류)");
             System.exit(1);
         }
-
-        InterfaceLogWriter log = new InterfaceLogWriter(Path.of(env.get("LOG_DIR") == null ? "logs" : env.get("LOG_DIR")));
 
         String orderTable = info.orderDb().table();
         OrderSyncFlow orderFlow = new OrderSyncFlow(
@@ -82,6 +83,19 @@ public final class EaiApplication {
         System.out.println("[INFO] EAI 연계 서비스 기동 — POST http://localhost:" + rest.port() + "/orders  (IF_ORD_001 DB + IF_ORD_002 FTP)");
         System.out.println("[INFO] 운송 배치(IF_SHP_001) " + interval.toSeconds() + "초 주기 — 수동 실행: POST http://localhost:" + rest.port() + "/batch/shipments/run");
         System.out.println("[INFO] 모니터링 로그: logs/interface-<날짜>.log");
+    }
+
+    /** 기동 점검 결과도 모니터링 로그에 1줄 — 화면 출력은 사라지지만 "그 시점 기동 상태"는 남아야 한다. */
+    private static void writeStartupLog(InterfaceLogWriter log, List<Preflight.Check> checks) {
+        var rec = log.newRecord();
+        rec.put("timestamp", java.time.OffsetDateTime.now(ZoneId.of("Asia/Seoul")).toString());
+        rec.put("interfaceId", "SYSTEM");
+        rec.put("type", "STARTUP");
+        Preflight.Level worst = checks.stream().map(Preflight.Check::level).max(Enum::compareTo).orElse(Preflight.Level.OK);
+        rec.put("resultCode", worst.name());
+        var arr = rec.putArray("checks");
+        checks.forEach(c -> arr.addObject().put("target", c.target()).put("level", c.level().name()).put("message", c.message()));
+        log.write(rec);
     }
 
     private static int intEnv(Env env, String name, int defaultValue) {
