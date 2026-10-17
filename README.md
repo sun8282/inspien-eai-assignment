@@ -5,7 +5,7 @@
 
 ![아키텍처 Before / After](docs/images/architecture.png)
 
-> 원본: [docs/diagrams/architecture.html](docs/diagrams/architecture.html) · AI 활용 기록: [docs/ai-usage.md](docs/ai-usage.md)
+> 원본: [docs/diagrams/architecture.html](docs/diagrams/architecture.html) · 확장성·부하 측정: [docs/scalability.md](docs/scalability.md) · AI 활용 기록: [docs/ai-usage.md](docs/ai-usage.md)
 
 ---
 
@@ -52,6 +52,7 @@ cp .env.example .env              # 이름·전화번호·이메일·제공 정�
 ./scripts/demo.sh                 # 시연: 상태·오류 케이스·배치 수동 실행·로그 요약 (쓰기 없음)
 ./scripts/demo.sh --order         # 시연: + 실제 샘플 주문 전송 (DB 적재 + FTP 업로드)
 ./gradlew test                    # 테스트 (운영 DB 미사용 — H2 Oracle 모드 + 가짜 FTP)
+./gradlew loadTest                # 로컬 부하 측정 (운영 서버에 절대 부하 금지 — 결과: build/load-test/result.md)
 ```
 
 | 환경변수 (`.env` 또는 OS) | 기본값 | 설명 |
@@ -59,6 +60,7 @@ cp .env.example .env              # 이름·전화번호·이메일·제공 정�
 | `APPLICANT_NAME` / `APPLICANT_PHONE` / `APPLICANT_EMAIL` | — | 제공 정보 요청값. **전화번호는 접속정보 복호화 키** |
 | `INSPIEN_API_USER` / `INSPIEN_API_PASSWORD` | — | 제공 정보 API Basic 인증 (`fetchInfo` 에서만 사용) |
 | `SERVER_PORT` | 8080 | REST 포트 |
+| `ORDER_MAX_CONCURRENT` | 8 | 주문 동시 처리 상한 — 초과 요청은 처리 전 즉시 `503 OVERLOADED` |
 | `SHIPMENT_INTERVAL_SEC` / `SHIPMENT_INITIAL_DELAY_SEC` | 300 / 10 | 배치 주기 / 기동 후 첫 실행 지연 |
 | `RECEIPT_CHARSET` | UTF-8 | 영수증 파일 인코딩 (수신측 요구 시 `EUC-KR`) |
 | `PROVISION_FILE` / `LOG_DIR` | `secrets/received.json` / `logs` | |
@@ -94,7 +96,8 @@ curl -X POST -H 'Content-Type: application/xml; charset=EUC-KR' --data-binary @o
 ### `POST /batch/shipments/run` — 운송 배치 즉시 실행 (운영자 수동 실행)
 실행 결과 JSON 반환. 주기 실행이 돌고 있으면 `409 SKIPPED`.
 
-### `GET /health` — `{"status":"UP"}`
+### `GET /health`
+`{"status":"UP","ordersInFlight":3,"maxConcurrentOrders":8,"ordersRejected":0}` — 처리 중 건수가 상한에 붙어 있고 거절 수가 늘면 용량 한계 도달.
 
 ---
 
@@ -144,7 +147,19 @@ FTP 재조회가 불가하므로 **보낸 바이트를 `archive/`에 그대로 �
 | 배치가 조용히 죽으면 안 된다 | `ScheduledExecutorService`는 작업 예외 시 **이후 주기를 조용히 취소** → 모든 Throwable 차단. 대상 없음도 1줄 로그(하트비트) |
 | 겹쳐 돌면 안 된다 | fixed-delay + 실행 중 플래그(수동 실행과도 상호 배제), 종료 시 청크 경계에서 중지 |
 
-### 4.4 공통
+### 4.4 부하 — 비동기·부하분산 대신 과부하 차단
+쇼핑몰이니 비동기·부하분산이 필요한지 **로컬 부하 측정**(실서버 지연 주입, 운영 서버 미사용)으로 검토했습니다. 자세한 서사: [docs/scalability.md](docs/scalability.md)
+
+| 10건/초 몰림 (15초) | 성공 응답 p95 | 거절 응답 | **처리됐지만 주문자는 타임아웃** |
+|---|---|---|---|
+| 과부하 차단 없음 | 28.2초 | - | **38건** (재전송 시 중복 적재·중복 영수증) |
+| 과부하 차단 (동시 8건) | 2.8초 | 7ms에 503 (102건) | **0건** |
+
+- 실시간 주문은 과제가 SYNC 계약을 명시 → 비동기 전환은 하지 않음(계약 변경 사항)
+- 병목은 서버가 아니라 **FTP 접속 대기(2.4초)**, 그리고 **초 단위 영수증 파일명**(초당 1건만 넘어도 파일명 시각이 밀림 — 평시 2건/초에서 15초간 14초) → 서버를 늘려서는 풀리지 않음
+- 대신 처리 전 즉시 거절하는 과부하 차단을 넣어 "처리됐는지 모르는 주문"을 없앰
+
+### 4.5 공통
 - **기동 점검**: 계정·테이블·컬럼·FTP 경로 오류는 기동 중단(재시도로 해결 불가), 네트워크 단절은 경고 후 기동(런타임 재시도), ID 잔여량 경고
 - **접속정보 보호**: 제공 응답을 **암호문 그대로** 보관하고 사용 시점에만 복호화(AES-128/ECB, 키 = SHA-1(전화번호) 앞 16바이트).
   키는 환경변수로 주입. 접속정보 객체의 `toString()`과 모든 도구 출력은 주소·계정·비밀번호를 가림
@@ -162,6 +177,7 @@ FTP 재조회가 불가하므로 **보낸 바이트를 `archive/`에 그대로 �
 | `UNSUPPORTED_ENCODING` | 400 | ✗ | 선언된 charset 으로 해석 불가 |
 | `NO_VALID_RECORD` | 422 | ✗ | 조인·검증 통과 행 없음 (제외 사유는 `excluded`) |
 | `PAYLOAD_TOO_LARGE` / `METHOD_NOT_ALLOWED` | 413 / 405 | ✗ | |
+| `OVERLOADED` | 503 | ✓ | 동시 처리 상한 초과 — **처리 시작 전 거절**, `Retry-After: 1`. 아무것도 쓰지 않았으므로 재전송 안전 |
 | `DB_CONNECTION` / `DB_TIMEOUT` | 503 | ✓ | 일시 장애 — 잠시 후 재전송 |
 | `DB_DUPLICATE_KEY` | 500 | ✓ | 외부 충돌로 재시도 한도 초과 |
 | `DB_ERROR` | 500 | ✗ | 기타 DB 오류 |
@@ -210,7 +226,7 @@ FTP 재조회가 불가하므로 **보낸 바이트를 `archive/`에 그대로 �
 
 ## 8. 테스트
 
-`./gradlew test` — **39개**, 운영 DB·FTP를 쓰지 않습니다 (H2 Oracle 모드 + 업로드 전용 가짜 FTP).
+`./gradlew test` — **40개**, 운영 DB·FTP를 쓰지 않습니다 (H2 Oracle 모드 + 업로드 전용 가짜 FTP).
 
 | 영역 | 내용 |
 |---|---|
@@ -219,6 +235,7 @@ FTP 재조회가 불가하므로 **보낸 바이트를 `archive/`에 그대로 �
 | 시나리오 1 장애 주입 | FTP 연결 실패, 업로드 거절, 전송 중 끊김(부분 파일), 커밋 실패 → roll-forward, 커밋 후 응답 유실 → 중복 없음, roll-forward 실패 → 수동조치, 파일명 충돌 |
 | 시나리오 2 | 청크·NO_DATA, 멱등(기적재 보정), 검증 실패 격리, DB 오류 청크 → 건별 재처리, 연속 실패 격리, 실행 상한 → 재개, 중지 신호, 타 지원자 데이터 미접근, 연결 실패 |
 | 스케줄러 | 예외 후에도 주기 지속, 실행 중 수동 실행 거부 |
+| 과부하 차단 | 상한 초과 요청은 즉시 503·재시도 가능·아무것도 쓰지 않음, 처리 중이던 요청은 정상 완료 |
 
 테스트가 잡아낸 실제 결함: ① roll-forward 시 원 트랜잭션 잠금으로 재적재가 막힘 ② **Oracle은 `''`를 NULL로 취급** —
 키셋 페이징 첫 조건 `ORDER_ID > ''`가 항상 거짓이 되어 배치가 오류 없이 영원히 "대상 없음"이 되는 문제.
@@ -230,7 +247,7 @@ FTP 재조회가 불가하므로 **보낸 바이트를 `archive/`에 그대로 �
 ```
 src/main/java/com/inspien/eai/
   EaiApplication          조립·기동 (기동 점검 → Flow 조립 → Sender 시작)
-  sender/                 RestSender(POST /orders, 배치 수동 실행), BatchScheduler            ← Sender Channel
+  sender/                 RestSender(POST /orders·과부하 차단, 배치 수동 실행), BatchScheduler ← Sender Channel
   mapping/                PayloadDecoder, OrderXmlParser, OrderFlattener, ReceiptFileMapper, ShipmentMapper ← Mapping
   receiver/               JdbcOrderReceiver, FtpReceiptReceiver, JdbcShipmentReceiver       ← Receiver Channel
   flow/                   OrderSyncFlow(IF_ORD_001/002), ShipmentBatchFlow(IF_SHP_001)      ← iFlow / ICO
@@ -258,7 +275,8 @@ src/main/java/com/inspien/eai/
 | 항목 | 현재 | 운영이라면 |
 |---|---|---|
 | 요청 중복 방지 | 같은 주문을 두 번 보내면 두 번 적재 | `Idempotency-Key` 헤더 + 처리 이력 테이블 |
-| FTP 접속 시간 | 요청마다 접속(서버 응답 ~2.4초) | 세션 풀 재사용 |
+| FTP 접속 시간 | 요청마다 접속(서버 응답 ~2.4초) → 동시 8건 기준 약 2.7건/초가 상한 | 세션 풀 재사용 ([확장 로드맵](docs/scalability.md#8-운영이라면--단계별-로드맵)) |
+| 영수증 파일명 | 초 단위 — 초당 1건 넘으면 파일명 시각이 앞당겨짐 | 영수증 큐 + 1분 집계 전송 (회계와 계약 협의) |
 | 수신처 계정 분리 | ORDER/SHIPMENT 동일 계정 전제(다르면 기동 중단) | 2단계 처리 + 멱등 확인 경로(현재 멱등 확인은 구현됨) |
 | 다중 인스턴스 | 단일 인스턴스 전제(채번 메모리 상한) | DB 시퀀스/채번 테이블, 분산 락 |
 | 격리 목록 | 메모리(재기동 시 해제) | 실패 이력 테이블 |
