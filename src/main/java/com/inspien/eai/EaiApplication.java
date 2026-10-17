@@ -6,6 +6,7 @@ import com.inspien.eai.flow.OrderSyncFlow;
 import com.inspien.eai.flow.ShipmentBatchFlow;
 import com.inspien.eai.id.IdAllocator;
 import com.inspien.eai.infra.ConnectionFactory;
+import com.inspien.eai.infra.Preflight;
 import com.inspien.eai.monitor.InterfaceLogWriter;
 import com.inspien.eai.monitor.OutboundArchive;
 import com.inspien.eai.mapping.ReceiptFileMapper;
@@ -21,10 +22,11 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.ZoneId;
+import java.util.List;
 
 /**
  * 연계 애플리케이션 진입점 — Sender/Mapper/Receiver 를 조립해 Flow 를 띄운다.
- * 설정 누락·복호화 실패는 기동 단계에서 즉시 중단(Fail-fast).
+ * 설정 누락·복호화 실패·접속/스키마 설정 오류는 기동 단계에서 즉시 중단(Fail-fast).
  */
 public final class EaiApplication {
 
@@ -32,6 +34,14 @@ public final class EaiApplication {
         Env env = Env.load();
         ProvisionInfo info = ProvisionInfo.load(env);
         int port = Integer.parseInt(env.get("SERVER_PORT") == null ? "8080" : env.get("SERVER_PORT"));
+        System.out.println("[INFO] 기동 점검 (APPLICANT_KEY=" + info.applicantKey() + ")");
+        List<Preflight.Check> checks = Preflight.run(info);
+        checks.forEach(System.out::println);
+        if (Preflight.hasFatal(checks)) {
+            System.err.println("[FATAL] 설정 오류로 기동 중단 — 위 ✗ 항목 확인 (재시도로 해결되지 않는 오류)");
+            System.exit(1);
+        }
+
         InterfaceLogWriter log = new InterfaceLogWriter(Path.of(env.get("LOG_DIR") == null ? "logs" : env.get("LOG_DIR")));
 
         String orderTable = info.orderDb().table();
