@@ -7,6 +7,8 @@ package com.inspien.eai.core;
 public enum ErrorCode {
     METHOD_NOT_ALLOWED(405, false, "허용되지 않은 메서드"),
     PAYLOAD_TOO_LARGE(413, false, "요청 본문이 너무 큼"),
+    /** 동시 처리 상한 초과 — 대기열에 쌓지 않고 즉시 거절. 처리 시작 전이라 아무것도 쓰지 않았으므로 재전송 안전 */
+    OVERLOADED(503, true, "처리 용량 초과 — 잠시 후 재시도"),
     UNSUPPORTED_ENCODING(400, false, "요청 본문 인코딩을 해석할 수 없음"),
     XML_PARSE(400, false, "XML 파싱 실패"),
     NO_VALID_RECORD(422, false, "적재 가능한 주문이 없음"),

@@ -71,7 +71,11 @@ public final class EaiApplication {
         BatchScheduler shipmentBatch = new BatchScheduler("shipment-batch", shipmentFlow::run, shipmentFlow::requestStop,
                 Duration.ofSeconds(intEnv(env, "SHIPMENT_INITIAL_DELAY_SEC", 10)), interval);
 
-        RestSender rest = new RestSender(port, orderFlow, shipmentBatch);
+        RestSender.Limits limits = new RestSender.Limits(
+                intEnv(env, "ORDER_MAX_CONCURRENT", RestSender.Limits.defaults().maxConcurrentOrders()),
+                RestSender.Limits.defaults().workerThreads(),
+                RestSender.Limits.defaults().queueCapacity());
+        RestSender rest = new RestSender(port, orderFlow, shipmentBatch, limits);
         rest.start();
         shipmentBatch.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -80,7 +84,7 @@ public final class EaiApplication {
             shipmentBatch.stop(Duration.ofSeconds(30));
         }, "shutdown"));
 
-        System.out.println("[INFO] EAI 연계 서비스 기동 — POST http://localhost:" + rest.port() + "/orders  (IF_ORD_001 DB + IF_ORD_002 FTP)");
+        System.out.println("[INFO] EAI 연계 서비스 기동 — POST http://localhost:" + rest.port() + "/orders  (IF_ORD_001 DB + IF_ORD_002 FTP, 동시 처리 상한 " + limits.maxConcurrentOrders() + ")");
         System.out.println("[INFO] 운송 배치(IF_SHP_001) " + interval.toSeconds() + "초 주기 — 수동 실행: POST http://localhost:" + rest.port() + "/batch/shipments/run");
         System.out.println("[INFO] 모니터링 로그: logs/interface-<날짜>.log");
     }
