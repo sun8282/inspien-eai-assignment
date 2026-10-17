@@ -3,6 +3,7 @@ package com.inspien.eai;
 import com.inspien.eai.config.Env;
 import com.inspien.eai.config.ProvisionInfo;
 import com.inspien.eai.flow.OrderSyncFlow;
+import com.inspien.eai.flow.ShipmentBatchFlow;
 import com.inspien.eai.id.IdAllocator;
 import com.inspien.eai.infra.ConnectionFactory;
 import com.inspien.eai.monitor.InterfaceLogWriter;
@@ -10,12 +11,15 @@ import com.inspien.eai.monitor.OutboundArchive;
 import com.inspien.eai.mapping.ReceiptFileMapper;
 import com.inspien.eai.receiver.FtpReceiptReceiver;
 import com.inspien.eai.receiver.JdbcOrderReceiver;
+import com.inspien.eai.receiver.JdbcShipmentReceiver;
+import com.inspien.eai.sender.BatchScheduler;
 import com.inspien.eai.sender.RestSender;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.ZoneId;
 
 /**
@@ -41,15 +45,38 @@ public final class EaiApplication {
                 new OutboundArchive(Path.of("archive")),
                 log);
 
-        RestSender rest = new RestSender(port, orderFlow);
+        // 시나리오2: 같은 계정이어야 적재+상태갱신을 한 트랜잭션으로 묶을 수 있다(점검 결과 동일). 다르면 기동 중단.
+        if (!info.orderDb().sameAccountAs(info.shipmentDb())) {
+            throw new IllegalStateException("ORDER_TB 와 SHIPMENT_TB 접속 계정이 다릅니다 — 단일 트랜잭션 전제 위반(분리 계정 모드는 미지원)");
+        }
+        ShipmentBatchFlow shipmentFlow = new ShipmentBatchFlow(
+                info.applicantKey(),
+                new ConnectionFactory(info.shipmentDb()),
+                new IdAllocator(info.shipmentDb().table(), "SHIPMENT_ID", info.applicantKey()),
+                new JdbcShipmentReceiver(orderTable, info.shipmentDb().table()),
+                log,
+                ShipmentBatchFlow.Settings.defaults());
+        Duration interval = Duration.ofSeconds(intEnv(env, "SHIPMENT_INTERVAL_SEC", 300));
+        BatchScheduler shipmentBatch = new BatchScheduler("shipment-batch", shipmentFlow::run, shipmentFlow::requestStop,
+                Duration.ofSeconds(intEnv(env, "SHIPMENT_INITIAL_DELAY_SEC", 10)), interval);
+
+        RestSender rest = new RestSender(port, orderFlow, shipmentBatch);
         rest.start();
+        shipmentBatch.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("[INFO] 종료 신호 — 처리 중 요청 마무리 후 중지 (최대 5초)");
+            System.out.println("[INFO] 종료 신호 — 신규 요청 차단, 배치는 청크 경계에서 중지 (최대 30초)");
             rest.stop(5);
+            shipmentBatch.stop(Duration.ofSeconds(30));
         }, "shutdown"));
 
         System.out.println("[INFO] EAI 연계 서비스 기동 — POST http://localhost:" + rest.port() + "/orders  (IF_ORD_001 DB + IF_ORD_002 FTP)");
+        System.out.println("[INFO] 운송 배치(IF_SHP_001) " + interval.toSeconds() + "초 주기 — 수동 실행: POST http://localhost:" + rest.port() + "/batch/shipments/run");
         System.out.println("[INFO] 모니터링 로그: logs/interface-<날짜>.log");
+    }
+
+    private static int intEnv(Env env, String name, int defaultValue) {
+        String v = env.get(name);
+        return v == null ? defaultValue : Integer.parseInt(v);
     }
 
     /** 영수증 파일 인코딩. 기본 UTF-8 — FTP 서버가 UTF-8(한글 파일명)이고 무손실. 수신측 요구 시 RECEIPT_CHARSET=EUC-KR. */

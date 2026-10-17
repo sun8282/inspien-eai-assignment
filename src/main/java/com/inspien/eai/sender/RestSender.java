@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
  * Sender Channel (REST, SYNC). 웹 프레임워크 없이 JDK HttpServer 사용.
  * <ul>
  *   <li>POST /orders — 주문 XML 수신 → 처리 결과 JSON 동기 반환</li>
+ *   <li>POST /batch/shipments/run — 운송 배치 즉시 실행(운영자 수동 실행·시연용). 실행 중이면 409</li>
  *   <li>GET  /health — 생존 확인</li>
  * </ul>
  */
@@ -32,10 +33,11 @@ public final class RestSender {
     private final HttpServer server;
     private final ExecutorService workers = Executors.newFixedThreadPool(8);
 
-    public RestSender(int port, OrderSyncFlow orderFlow) throws IOException {
+    public RestSender(int port, OrderSyncFlow orderFlow, BatchScheduler shipmentBatch) throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 0);
         server.setExecutor(workers);
         server.createContext("/orders", ex -> handleOrders(ex, orderFlow));
+        server.createContext("/batch/shipments/run", ex -> handleBatchRun(ex, shipmentBatch));
         server.createContext("/health", ex -> respond(ex, 200, JSON.createObjectNode().put("status", "UP")));
     }
 
@@ -65,6 +67,23 @@ public final class RestSender {
             respond(ex, status, toJson(r));
         } catch (Exception e) {
             respond(ex, 500, error(ErrorCode.INTERNAL, e.getClass().getSimpleName()));
+        } finally {
+            ex.close();
+        }
+    }
+
+    private void handleBatchRun(HttpExchange ex, BatchScheduler batch) throws IOException {
+        try {
+            if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+                respond(ex, 405, error(ErrorCode.METHOD_NOT_ALLOWED, "POST 만 허용됩니다"));
+                return;
+            }
+            var result = batch.runNow("MANUAL");
+            if (result.isEmpty()) {
+                respond(ex, 409, JSON.createObjectNode().put("resultCode", "SKIPPED").put("message", "배치가 이미 실행 중입니다"));
+                return;
+            }
+            respond(ex, result.get().errorCode() == null ? 200 : 500, JSON.valueToTree(result.get()));
         } finally {
             ex.close();
         }
