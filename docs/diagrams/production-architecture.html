@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Production Architecture</title>
+<style>
+  html, body { margin: 0; background: #ffffff; }
+  svg { display: block; font-family: "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+  .title { font-size: 30px; font-weight: 700; fill: #111827; }
+  .sub { font-size: 16px; fill: #4b5563; }
+  .zone { font-size: 18px; font-weight: 700; }
+  .tb { font-size: 16px; font-weight: 700; fill: #111827; }
+  .s { font-size: 13px; fill: #374151; }
+  .lbl { font-size: 13px; font-weight: 600; fill: #1f2937; }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+  </defs>
+
+  <text x="40" y="50" class="title">운영 아키텍처 — 피크 1,000 주문/초 가정</text>
+  <text x="40" y="78" class="sub">동기 구간은 주문 DB 확정까지만 · 영수증·운송은 Outbox → Kafka → 멱등 컨슈머 · 모든 흐름은 대사로 마감</text>
+
+  <!-- SYNC ZONE -->
+  <rect x="30" y="100" width="830" height="430" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="2" stroke-dasharray="8 5"/>
+  <text x="52" y="130" class="zone" fill="#1d4ed8">동기 구간 — 주문자가 기다리는 구간 (목표 p99 &lt; 500ms)</text>
+
+  <rect x="56" y="170" width="150" height="90" rx="10" fill="#fff" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="131" y="204" text-anchor="middle" class="tb">주문자</text>
+  <text x="131" y="226" text-anchor="middle" class="s">쇼핑몰 BE</text>
+  <text x="131" y="246" text-anchor="middle" class="s">Idempotency-Key</text>
+
+  <rect x="240" y="160" width="190" height="110" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="1.5"/>
+  <text x="335" y="190" text-anchor="middle" class="tb">L7 LB / Gateway</text>
+  <text x="335" y="212" text-anchor="middle" class="s">이중화 · TLS 종료</text>
+  <text x="335" y="232" text-anchor="middle" class="s">클라이언트별 Rate Limit</text>
+  <text x="335" y="252" text-anchor="middle" class="s">Readiness 기반 라우팅</text>
+  <line x1="206" y1="215" x2="236" y2="215" stroke="#374151" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- API pods -->
+  <g>
+    <rect x="480" y="150" width="350" height="140" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="655" y="176" text-anchor="middle" class="tb">Order API × N (무상태, 3 AZ, HPA)</text>
+    <text x="500" y="202" class="s">① Admission Control (초과 503)</text>
+    <text x="500" y="222" class="s">② 멱등 확인 (IDEMPOTENCY_TB)</text>
+    <text x="500" y="242" class="s">③ 파싱·조인·검증 (현재 Mapping 재사용)</text>
+    <text x="500" y="262" class="s">④ 1 트랜잭션: ORDER + OUTBOX + IDEMPOTENCY</text>
+    <text x="500" y="282" class="s">⑤ 200 ACCEPTED (영수증 PENDING)</text>
+  </g>
+  <line x1="430" y1="215" x2="476" y2="215" stroke="#374151" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- Oracle -->
+  <rect x="480" y="340" width="350" height="160" rx="10" fill="#fff" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="655" y="368" text-anchor="middle" class="tb">Oracle (RAC 또는 Primary + Data Guard)</text>
+  <rect x="500" y="384" width="100" height="44" rx="6" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="550" y="411" text-anchor="middle" class="lbl">ORDER_TB</text>
+  <rect x="610" y="384" width="100" height="44" rx="6" fill="#fef9c3" stroke="#ca8a04"/>
+  <text x="660" y="411" text-anchor="middle" class="lbl">OUTBOX</text>
+  <rect x="720" y="384" width="96" height="44" rx="6" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="768" y="406" text-anchor="middle" class="lbl">IDEMPO</text>
+  <text x="768" y="421" text-anchor="middle" class="lbl">TENCY</text>
+  <text x="500" y="452" class="s">일 단위 파티셔닝(CREATE_TIME) · 보관 만료 파티션 DROP</text>
+  <text x="500" y="472" class="s">커넥션 풀 산정: 인스턴스 × 풀 ≤ 허용 세션</text>
+  <text x="500" y="490" class="s">SHIPMENT_TB UNIQUE(APPLICANT_KEY, ORDER_ID)</text>
+  <line x1="655" y1="290" x2="655" y2="336" stroke="#374151" stroke-width="2" marker-end="url(#a)"/>
+  <text x="664" y="318" class="lbl">COMMIT (수십 ms)</text>
+
+  <!-- ASYNC ZONE -->
+  <rect x="30" y="560" width="1540" height="380" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" stroke-dasharray="8 5"/>
+  <text x="330" y="590" class="zone" fill="#6d28d9">비동기 구간 — 늦어도 되지만 유실은 불허 (at-least-once + 멱등 소비)</text>
+
+  <!-- Relay -->
+  <rect x="56" y="620" width="230" height="110" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="171" y="648" text-anchor="middle" class="tb">Outbox Relay</text>
+  <text x="171" y="670" text-anchor="middle" class="s">CDC (Debezium / GoldenGate)</text>
+  <text x="171" y="690" text-anchor="middle" class="s">대안: SKIP LOCKED 폴링</text>
+  <text x="171" y="710" text-anchor="middle" class="s">지표: outbox 최고령(age)</text>
+  <path d="M480,406 L171,406 L171,616" fill="none" stroke="#ca8a04" stroke-width="2" marker-end="url(#a)"/>
+  <text x="186" y="396" class="lbl" fill="#92400e">OUTBOX 변경 캡처 (커밋된 것만)</text>
+
+  <!-- Kafka -->
+  <rect x="330" y="610" width="420" height="300" rx="12" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="540" y="638" text-anchor="middle" class="tb">Kafka 클러스터 (브로커 3+, AZ 분산)</text>
+  <text x="540" y="658" text-anchor="middle" class="s">RF=3 · min.insync=2 · acks=all · 멱등 프로듀서 · 보존 7일</text>
+  <rect x="350" y="676" width="380" height="50" rx="8" fill="#fff" stroke="#7c3aed"/>
+  <text x="540" y="698" text-anchor="middle" class="lbl">order.created.v1</text>
+  <text x="540" y="716" text-anchor="middle" class="s">파티션 24 · key = ORDER_ID · Schema Registry</text>
+  <rect x="350" y="738" width="185" height="44" rx="8" fill="#fff" stroke="#a78bfa"/>
+  <text x="442" y="765" text-anchor="middle" class="s">receipt.retry.1m / 10m</text>
+  <rect x="545" y="738" width="185" height="44" rx="8" fill="#fff" stroke="#a78bfa"/>
+  <text x="637" y="765" text-anchor="middle" class="s">shipment.retry.1m / 10m</text>
+  <rect x="350" y="792" width="380" height="40" rx="8" fill="#fee2e2" stroke="#ef4444"/>
+  <text x="540" y="817" text-anchor="middle" class="lbl" fill="#991b1b">*.dlq — 독성 메시지 격리 · 알림 · 재처리 도구</text>
+  <text x="350" y="860" class="s">재처리(Replay): 오프셋 되감기로 특정 시간대 영수증 재생성</text>
+  <text x="350" y="880" class="s">피크 버퍼: 컨슈머는 지속 가능한 속도로 소비, 랙 기반 오토스케일</text>
+  <line x1="286" y1="700" x2="346" y2="700" stroke="#374151" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- Receipt aggregator -->
+  <rect x="800" y="610" width="370" height="140" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="985" y="636" text-anchor="middle" class="tb">Receipt Aggregator (컨슈머 그룹)</text>
+  <text x="818" y="660" class="s">1분 시간창 × 파티션 집계 (주문 확정 시각 기준)</text>
+  <text x="818" y="680" class="s">결정적 파일명 → 이미 있으면 건너뜀 (쓰기 전용 FTP 멱등)</text>
+  <text x="818" y="700" class="s">데이터 파일 → 제어 파일(건수·합계·해시) 순 업로드</text>
+  <text x="818" y="720" class="s">업로드 성공 후 오프셋 커밋 · FTP 세션 풀 · 회로 차단기</text>
+  <text x="818" y="740" class="s">현재 ReceiptFileMapper · FtpReceiptReceiver 재사용</text>
+  <path d="M750,690 L776,690 L776,680 L796,680" fill="none" stroke="#374151" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- Shipment consumer -->
+  <rect x="800" y="770" width="370" height="140" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="985" y="796" text-anchor="middle" class="tb">Shipment Consumer (컨슈머 그룹)</text>
+  <text x="818" y="820" class="s">SHIPMENT INSERT + ORDER STATUS 'Y' (한 트랜잭션)</text>
+  <text x="818" y="840" class="s">UNIQUE 제약으로 중복 무시 → 상태만 보정 (멱등)</text>
+  <text x="818" y="860" class="s">일시 오류 → 재시도 토픽 → DLQ</text>
+  <text x="818" y="880" class="s">운송사가 API면 토큰 버킷 + 회로 차단기</text>
+  <text x="818" y="900" class="s">현재 ShipmentBatchFlow 의 멱등·격리 규칙 승계</text>
+  <path d="M750,710 L776,710 L776,840 L796,840" fill="none" stroke="#374151" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- external receivers -->
+  <rect x="1220" y="620" width="320" height="110" rx="10" fill="#fff" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="1380" y="648" text-anchor="middle" class="tb">회계 SFTP (FTP 대체)</text>
+  <text x="1380" y="672" text-anchor="middle" class="s">INSPIEN_TOTO_yyyyMMddHHmm_P07.txt</text>
+  <text x="1380" y="692" text-anchor="middle" class="s">+ .ctl (건수 · PRICE 합계 · SHA-256)</text>
+  <text x="1380" y="712" text-anchor="middle" class="s">분당 최대 24개 파일 (피크 6만 건/분)</text>
+  <line x1="1170" y1="675" x2="1216" y2="675" stroke="#374151" stroke-width="2" marker-end="url(#a)"/>
+
+  <rect x="1220" y="780" width="320" height="110" rx="10" fill="#fff" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="1380" y="808" text-anchor="middle" class="tb">운송사 DB / API</text>
+  <text x="1380" y="832" text-anchor="middle" class="s">SHIPMENT_TB — 준실시간 접수</text>
+  <text x="1380" y="852" text-anchor="middle" class="s">(현재 최대 5분 → 평시 1분 이내)</text>
+  <line x1="1170" y1="835" x2="1216" y2="835" stroke="#374151" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- right side of sync zone: reconciliation & ops -->
+  <rect x="900" y="100" width="670" height="200" rx="14" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="922" y="130" class="zone" fill="#15803d">대사 · 관측 — 이벤트는 빠르고, 정합성은 대사가 보장</text>
+  <rect x="922" y="148" width="300" height="134" rx="10" fill="#fff" stroke="#16a34a"/>
+  <text x="1072" y="174" text-anchor="middle" class="tb">Reconciliation Job (매시·매일)</text>
+  <text x="938" y="198" class="s">ORDER ↔ 영수증 라인 ↔ SHIPMENT 건수·금액</text>
+  <text x="938" y="218" class="s">N 잔존(10분 경과) → 이벤트 재발행</text>
+  <text x="938" y="238" class="s">현재 배치 코드(청크·키셋·선점) 재배치</text>
+  <text x="938" y="258" class="s">ShedLock / CronJob 으로 1대만 실행</text>
+  <rect x="1240" y="148" width="310" height="134" rx="10" fill="#fff" stroke="#16a34a"/>
+  <text x="1395" y="174" text-anchor="middle" class="tb">Observability</text>
+  <text x="1256" y="198" class="s">RED 지표 · in-flight · 거절 수</text>
+  <text x="1256" y="218" class="s">outbox age · 컨슈머 랙 · DLQ 크기</text>
+  <text x="1256" y="238" class="s">OpenTelemetry: MSG_ID = traceId 전파</text>
+  <text x="1256" y="258" class="s">JSON 로그 → OpenSearch · RTIMS 대시보드</text>
+
+  <rect x="900" y="320" width="670" height="210" rx="14" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="922" y="350" class="zone" fill="#c2410c">과부하 방어 — 계층별</text>
+  <text x="922" y="380" class="s">Gateway: 클라이언트별 토큰 버킷 → 429</text>
+  <text x="922" y="404" class="s">API 인스턴스: Admission Control → 503 + Retry-After (과제 구현과 동일)</text>
+  <text x="922" y="428" class="s">DB: 풀 대기 상한 200ms → 503, Readiness false 전환</text>
+  <text x="922" y="452" class="s">비동기: Kafka 가 피크 흡수 → 주문 접수는 FTP·운송사 장애와 무관</text>
+  <text x="922" y="476" class="s">외부 수신처: 회로 차단기 + 재시도 토픽 → 적체(유실 없음) 후 따라잡기</text>
+  <text x="922" y="508" class="lbl">"처리됐는지 모르는 주문" 0 — 거절은 처리 전, 재전송은 Idempotency-Key 로 안전</text>
+
+  <!-- legend / footer -->
+  <rect x="30" y="960" width="1540" height="130" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="52" y="990" class="lbl">과제 계약 → 운영 계약 (협의 항목)</text>
+  <text x="52" y="1016" class="s">· 응답: DB+FTP 완료 후 SYNC → DB 확정(ACCEPTED) 후 응답 + 상태 조회/콜백        · 영수증: 주문당 1파일·초 단위 파일명 → 1분 집계 + 제어 파일</text>
+  <text x="52" y="1040" class="s">· ID: [A-Z][0-9]{3} (피크 9초 만에 소진) → DB 시퀀스 + 업무 표시 번호        · 운송: 5분 폴링 → 이벤트 소비 + 대사 배치        · 전송: FTP → SFTP</text>
+  <text x="52" y="1064" class="s">· 재전송: 규약 없음 → Idempotency-Key 필수, 429/503 시 Retry-After 준수        · 확장: 단일 인스턴스 → 무상태 API N대 + 컨슈머 그룹</text>
+</svg>
+</body>
+</html>

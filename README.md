@@ -5,7 +5,7 @@
 
 ![아키텍처 Before / After](docs/images/architecture.png)
 
-> 원본: [docs/diagrams/architecture.html](docs/diagrams/architecture.html) · 확장성·부하 측정: [docs/scalability.md](docs/scalability.md) · AI 활용 기록: [docs/ai-usage.md](docs/ai-usage.md)
+> 원본: [docs/diagrams/architecture.html](docs/diagrams/architecture.html) · 확장성·부하 측정: [docs/scalability.md](docs/scalability.md) · **운영 설계(Kafka·Outbox·클러스터링): [docs/production-design.md](docs/production-design.md)** · AI 활용 기록: [docs/ai-usage.md](docs/ai-usage.md)
 
 ---
 
@@ -158,6 +158,7 @@ FTP 재조회가 불가하므로 **보낸 바이트를 `archive/`에 그대로 �
 - 실시간 주문은 과제가 SYNC 계약을 명시 → 비동기 전환은 하지 않음(계약 변경 사항)
 - 병목은 서버가 아니라 **FTP 접속 대기(2.4초)**, 그리고 **초 단위 영수증 파일명**(초당 1건만 넘어도 파일명 시각이 밀림 — 평시 2건/초에서 15초간 14초) → 서버를 늘려서는 풀리지 않음
 - 대신 처리 전 즉시 거절하는 과부하 차단을 넣어 "처리됐는지 모르는 주문"을 없앰
+- 피크 1,000건/초를 가정한 운영 설계(동기 구간 축소, Transactional Outbox, Kafka, 영수증 시간창 집계, 클러스터링·부하분산, 장애 시나리오, 계약 협의 항목): [docs/production-design.md](docs/production-design.md)
 
 ### 4.5 공통
 - **기동 점검**: 계정·테이블·컬럼·FTP 경로 오류는 기동 중단(재시도로 해결 불가), 네트워크 단절은 경고 후 기동(런타임 재시도), ID 잔여량 경고
