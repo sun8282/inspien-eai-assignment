@@ -59,3 +59,13 @@ tasks.register('connCheck', JavaExec) {
     mainClass = 'com.inspien.eai.tool.ConnectivityCheck'
     workingDir = rootDir
 }
+
+// 로컬 부하 측정 — 운영 DB·FTP 미사용 (H2 + 가짜 FTP, 실측 지연 주입). 결과: build/load-test/result.md
+tasks.register('loadTest', JavaExec) {
+    group = 'verification'
+    description = '과부하 차단 전/후 부하 측정 (로컬 전용)'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.inspien.eai.load.LoadTest'
+    workingDir = rootDir
+    dependsOn 'testClasses'
+}
